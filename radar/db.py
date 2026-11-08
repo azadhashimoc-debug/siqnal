@@ -78,6 +78,8 @@ MIGRATIONS = [
     ("topic_days", "distinct_voices", "INTEGER NOT NULL DEFAULT 0"),
     ("topic_days", "distinct_sources", "INTEGER NOT NULL DEFAULT 0"),
     ("topic_days", "avg_score", "REAL"),
+    ("validations", "decision", "TEXT"),
+    ("validations", "data", "TEXT"),
 ]
 
 

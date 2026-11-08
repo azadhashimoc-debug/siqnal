@@ -1,0 +1,219 @@
+import json
+import logging
+import re
+from dataclasses import dataclass, field, asdict
+from datetime import date
+from pathlib import Path
+from typing import Optional
+
+from radar import config, trends
+
+log = logging.getLogger(__name__)
+MODEL = "claude-sonnet-5-5"
+TOOLS = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 10}]
+MAX_CONSECUTIVE_API_ERRORS = 3
+REVALIDATE_DAYS = 28
+DIMENSIONS = ("demand", "competition", "willingness_to_pay", "timing")
+DECISIONS = ("gec", "izle", "reddet")
+COSTS = ("az", "orta", "yuksek")
+PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "validate.md"
+CALIBRATION_DIR = Path(__file__).resolve().parent.parent / "docs" / "calibration"
+RETRY_NOTE = ("\n\nDİQQƏT: əvvəlki cavab etibarsız idi. Ən azı 3 fərqli növ həll ver "
+              "və ən azı biri start_cost=\"az\" olsun.")
+
+
+class ValidateAPIError(Exception):
+    """API failure (network, rate limit, auth)."""
+
+
+class ValidateParseError(Exception):
+    """Model output could not be parsed into a Validation."""
+
+
+@dataclass
+class Solution:
+    title: str
+    how_it_works: str
+    business_model: str
+    start_cost: str  # az | orta | yuksek
+    difficulty: int  # 1-5
+    first_step: str
+    competitor_urls: list = field(default_factory=list)
+    start_cost_text: str = ""  # rough AZN range
+
+
+@dataclass
+class Validation:
+    topic_id: int
+    problem: str
+    sub_pains: list
+    demand: dict
+    competition: dict
+    willingness_to_pay: dict
+    timing: dict
+    decision: str  # gec | izle | reddet
+    solutions: list
+    risks: list
+    market_size: dict
+    unverified_claims: list
+
+
+def extract_json(raw: str):
+    """Strip code fences / surrounding prose and parse the outermost JSON object."""
+    s = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
+    try:
+        return json.loads(s)
+    except ValueError:
+        i, j = s.find("{"), s.rfind("}")
+        if i < 0 or j <= i:
+            raise
+        return json.loads(s[i:j + 1])
+
+
+def _evidence(conn, topic_id: int, limit: int = 20) -> list:
+    return conn.execute(
+        "SELECT r.text, r.url FROM classifications c JOIN records r ON r.id = c.record_id "
+        "WHERE c.topic_id=? GROUP BY r.text_hash "
+        "ORDER BY MAX(COALESCE(r.published, r.created_at)) DESC, MAX(r.id) DESC LIMIT ?",
+        (topic_id, limit)).fetchall()
+
+
+def _votes(conn, limit: int = 10) -> list:
+    return conn.execute(
+        "SELECT v.vote, COALESCE(val.idea, ''), COALESCE(val.decision, '') FROM votes v "
+        "JOIN validations val ON val.id = v.validation_id WHERE v.vote IN (1, -1) "
+        "ORDER BY v.created_at DESC, v.id DESC LIMIT ?", (limit,)).fetchall()
+
+
+def build_prompt(conn, topic_id: int) -> str:
+    row = conn.execute("SELECT name FROM topics WHERE id=?", (topic_id,)).fetchone()
+    topic = row[0] if row else str(topic_id)
+    calib = "\n\n---\n\n".join(p.read_text(encoding="utf-8") for p in sorted(CALIBRATION_DIR.glob("*.md")))
+    votes = "\n".join(f"{'👍' if v == 1 else '👎'} {idea} ({dec})" for v, idea, dec in _votes(conn)) or "(yoxdur)"
+    ev = "\n".join(f"- {t[:500]} — {u}" for t, u in _evidence(conn, topic_id)) or "(yoxdur)"
+    tpl = PROMPT_PATH.read_text(encoding="utf-8")
+    for k, v in (("CALIBRATION", calib), ("VOTES", votes), ("TOPIC", topic), ("EVIDENCE", ev)):
+        tpl = tpl.replace("{{" + k + "}}", v)
+    return tpl
+
+
+def _url_ok(u) -> bool:
+    return isinstance(u, str) and u.strip().lower().startswith(("http://", "https://"))
+
+
+def _dim(d) -> dict:
+    d = d if isinstance(d, dict) else {}
+    sc = d.get("score")
+    sc = sc if isinstance(sc, int) and not isinstance(sc, bool) and 0 <= sc <= 10 else 0
+    claims = [{"text": str(c.get("text", "")), "url": c["url"].strip()}
+              for c in d.get("claims") or [] if isinstance(c, dict) and _url_ok(c.get("url"))]
+    return {"score": sc, "claims": claims}
+
+
+def _solution(s) -> Optional[Solution]:
+    if not isinstance(s, dict) or s.get("start_cost") not in COSTS:
+        return None
+    diff = s.get("difficulty")
+    if isinstance(diff, bool) or not isinstance(diff, int):
+        return None
+    return Solution(
+        title=str(s.get("title", "")), how_it_works=str(s.get("how_it_works", "")),
+        business_model=str(s.get("business_model", "")), start_cost=s["start_cost"],
+        difficulty=min(5, max(1, diff)), first_step=str(s.get("first_step", "")),
+        competitor_urls=[u for u in s.get("competitor_urls") or [] if _url_ok(u)],
+        start_cost_text=str(s.get("start_cost_text", "")))
+
+
+def _strs(v) -> list:
+    return [str(x) for x in v] if isinstance(v, list) else []
+
+
+def _parse(topic_id: int, raw: str) -> Validation:
+    try:
+        d = extract_json(raw)
+    except ValueError as e:
+        raise ValidateParseError(str(e)) from e
+    if not isinstance(d, dict):
+        raise ValidateParseError("not a JSON object")
+    ms = d.get("market_size") if isinstance(d.get("market_size"), dict) else {}
+    v = Validation(
+        topic_id=topic_id, problem=str(d.get("problem", "")), sub_pains=_strs(d.get("sub_pains")),
+        **{k: _dim(d.get(k)) for k in DIMENSIONS},
+        decision=d.get("decision") if d.get("decision") in DECISIONS else "reddet",
+        solutions=[s for s in map(_solution, d.get("solutions") or []) if s][:5],
+        risks=_strs(d.get("risks")),
+        market_size={"estimate": str(ms.get("estimate", "")),
+                     "url": ms["url"].strip() if _url_ok(ms.get("url")) else None},
+        unverified_claims=_strs(d.get("unverified_claims")))
+    if v.decision == "gec" and any(not getattr(v, k)["claims"] for k in DIMENSIONS):
+        v.decision = "izle"
+    return v
+
+
+def _solutions_ok(v: Validation) -> bool:
+    return len(v.solutions) >= 3 and any(s.start_cost == "az" for s in v.solutions)
+
+
+def _call(client, prompt: str) -> str:
+    try:
+        resp = client.messages.create(model=MODEL, max_tokens=8000, tools=TOOLS,
+                                      messages=[{"role": "user", "content": prompt}])
+    except Exception as e:  # SDK not imported here; any client exception = API failure
+        raise ValidateAPIError(str(e)) from e
+    texts = [b.text for b in resp.content
+             if getattr(b, "type", "text") == "text" and getattr(b, "text", None)]
+    if not texts:
+        raise ValidateParseError("no text block in response")
+    return texts[-1]
+
+
+def validate_topic(client, conn, topic_id: int) -> Validation:
+    """Raises ValidateAPIError / ValidateParseError. If the solutions rule fails
+    (<3 solutions or none with start_cost "az"), retries once, then caps decision at izle."""
+    prompt = build_prompt(conn, topic_id)
+    try:
+        v = _parse(topic_id, _call(client, prompt))
+        if _solutions_ok(v):
+            return v
+    except ValidateParseError as e:
+        log.warning("validate parse error for topic %s, retrying: %s", topic_id, e)
+    v = _parse(topic_id, _call(client, prompt + RETRY_NOTE))
+    if not _solutions_ok(v):
+        v.decision = "izle"
+    return v
+
+
+def save(conn, v: Validation) -> int:
+    idea = v.solutions[0].title if v.solutions else v.problem
+    cur = conn.execute(
+        "INSERT INTO validations(topic_id, idea, result, decision, data) VALUES(?,?,?,?,?)",
+        (v.topic_id, idea, v.decision, v.decision, json.dumps(asdict(v), ensure_ascii=False)))
+    conn.commit()
+    return cur.lastrowid
+
+
+def validate_week(client, conn, today: Optional[date] = None) -> list:
+    today = today or date.today()
+    recent = {r[0] for r in conn.execute(
+        "SELECT topic_id FROM validations WHERE created_at >= datetime('now', ?)",
+        (f"-{REVALIDATE_DAYS} days",))}
+    todo = [t for t in trends.candidates(conn, today) if t not in recent]
+    out, errors = [], 0
+    for tid in todo[:config.MAX_VALIDATIONS_PER_WEEK]:
+        try:
+            v = validate_topic(client, conn, tid)
+        except ValidateAPIError as e:
+            errors += 1
+            log.warning("validate API error for topic %s: %s", tid, e)
+            if errors >= MAX_CONSECUTIVE_API_ERRORS:
+                log.error("stopping after %d consecutive API errors", errors)
+                break
+            continue
+        except ValidateParseError as e:
+            errors = 0
+            log.warning("unparseable validation for topic %s: %s", tid, e)
+            continue
+        errors = 0
+        save(conn, v)
+        out.append(v)
+    return out
