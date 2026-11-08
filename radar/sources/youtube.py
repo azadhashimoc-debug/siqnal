@@ -1,7 +1,10 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 from radar import config
 from radar.models import Record
+
+log = logging.getLogger(__name__)
 
 
 class YoutubeSource:
@@ -27,16 +30,23 @@ class YoutubeSource:
         since = (datetime.now(timezone.utc) - timedelta(days=self.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         out = []
         for ch in self.channels:
-            vids = yt.search().list(part="id", channelId=ch, type="video", order="date",
-                                    publishedAfter=since, maxResults=25).execute().get("items", [])
+            try:
+                vids = yt.search().list(part="id", channelId=ch, type="video", order="date",
+                                        publishedAfter=since, maxResults=25).execute().get("items", [])
+            except Exception:
+                log.exception("youtube channel %s failed", ch)
+                continue
             for v in vids:
-                vid = v["id"]["videoId"]
-                url = f"https://www.youtube.com/watch?v={vid}"
-                threads = yt.commentThreads().list(part="snippet", videoId=vid, maxResults=100,
-                                                   textFormat="plainText").execute().get("items", [])
-                for t in threads:
-                    sn = t["snippet"]["topLevelComment"]["snippet"]  # author fields deliberately ignored
-                    out.append(Record(self.name, "comment", f"{url}&lc={t['id']}", sn["textDisplay"],
-                                      datetime.fromisoformat(sn["publishedAt"].replace("Z", "+00:00")),
-                                      parent_url=url))
+                try:
+                    vid = v["id"]["videoId"]
+                    url = f"https://www.youtube.com/watch?v={vid}"
+                    threads = yt.commentThreads().list(part="snippet", videoId=vid, maxResults=100,
+                                                       textFormat="plainText").execute().get("items", [])
+                    for t in threads:
+                        sn = t["snippet"]["topLevelComment"]["snippet"]  # author fields deliberately ignored
+                        out.append(Record(self.name, "comment", f"{url}&lc={t['id']}", sn["textDisplay"],
+                                          datetime.fromisoformat(sn["publishedAt"].replace("Z", "+00:00")),
+                                          parent_url=url))
+                except Exception:
+                    log.exception("youtube video failed (comments disabled?)")
         return out

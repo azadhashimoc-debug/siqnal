@@ -84,5 +84,5 @@ def test_low_yield_source_disabled():
     conn.commit()
     y = source_yield(conn, weeks=4)
     assert y["e"] == 0 and y["a"] == 1.0
-    assert disable_low_yield(conn) == ["e"]
+    assert disable_low_yield(conn, min_records=5) == ["e"]
     assert conn.execute("select disabled from sources where name='e'").fetchone()[0] == 1

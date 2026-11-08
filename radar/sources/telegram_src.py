@@ -1,10 +1,15 @@
+import logging
+
 from radar import config
 from radar.models import Record
 
+log = logging.getLogger(__name__)
+
 
 class TelegramSource:
-    """`client` exposes iter_messages(channel, min_id=...) like Telethon (injectable).
-    Last seen ids persist in source_state when `conn` is given."""
+    """`client` exposes iter_messages(channel, min_id=..., limit=...) like Telethon (injectable).
+    Last seen ids persist in source_state when `conn` is given. fetch() is a generator: a channel's
+    last id is saved only after the consumer has taken all of that channel's records."""
 
     name = "telegram"
 
@@ -33,13 +38,18 @@ class TelegramSource:
 
     def fetch(self):
         if not self.channels:
-            return []
-        tg, out = self._tg(), []
+            return
+        tg = self._tg()
         for ch in self.channels:
-            top = last = self._last(ch)
-            for m in tg.iter_messages(ch, min_id=last):
-                top = max(top, m.id)
-                if m.text:  # sender fields deliberately ignored
-                    out.append(Record(self.name, "news", f"https://t.me/{ch}/{m.id}", m.text, m.date))
-            self._save(ch, top)
-        return out
+            try:
+                top = last = self._last(ch)
+                kwargs = {"min_id": last}
+                if last == 0:
+                    kwargs["limit"] = config.TELEGRAM_FIRST_RUN_LIMIT
+                for m in tg.iter_messages(ch, **kwargs):
+                    top = max(top, m.id)
+                    if m.text:  # sender fields deliberately ignored
+                        yield Record(self.name, "news", f"https://t.me/{ch}/{m.id}", m.text, m.date)
+                self._save(ch, top)
+            except Exception:
+                log.exception("telegram channel %s failed", ch)

@@ -1,7 +1,10 @@
+import logging
 from datetime import datetime, timezone
 
 from radar import config
 from radar.models import Record
+
+log = logging.getLogger(__name__)
 
 
 class ApifySource:
@@ -38,12 +41,24 @@ class ApifySource:
         for actor in self.actors:
             if self._runs_this_week() >= self.max_runs:
                 break
-            items = self._cl().run(actor)
-            self.conn.execute("INSERT INTO apify_runs(actor, run_id, status) VALUES(?,?,?)", (actor, "", "ok"))
+            try:
+                items = list(self._cl().run(actor))
+                status = "ok"
+            except Exception:
+                log.exception("apify actor %s failed", actor)
+                items, status = [], "failed"
+            # failed runs are recorded too, so they count toward the weekly cap
+            self.conn.execute("INSERT INTO apify_runs(actor, run_id, status) VALUES(?,?,?)", (actor, "", status))
             self.conn.commit()
             for it in items:
-                text, url = it.get("text") or it.get("message"), it.get("url") or it.get("postUrl")
-                if text and url:  # author/profile fields deliberately dropped
-                    out.append(Record(self.name, "comment", url, text, datetime.now(timezone.utc),
-                                      parent_url=it.get("postUrl")))
+                post = it.get("postUrl") or it.get("url")
+                text = it.get("text") or it.get("message")
+                if not (text and post):
+                    continue
+                # Dedupe key is (url_norm, text_hash), so distinct comment texts under one post do not
+                # collapse. A per-comment id, when present, is appended to keep identical texts apart.
+                cid = it.get("id")
+                url = f"{post}#{cid}" if cid else post
+                # author/profile fields deliberately dropped
+                out.append(Record(self.name, "comment", url, text, datetime.now(timezone.utc), parent_url=post))
         return out

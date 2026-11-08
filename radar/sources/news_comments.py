@@ -8,6 +8,9 @@ from radar.models import Record
 from radar.normalize import clean_html
 
 
+_VOID = {"br", "img", "hr", "input", "meta", "link", "area", "base", "col", "embed", "source", "track", "wbr"}
+
+
 class _ClassCollector(HTMLParser):
     """Collects text of elements carrying a given class (simple '.class' selectors only)."""
 
@@ -15,7 +18,12 @@ class _ClassCollector(HTMLParser):
         super().__init__()
         self.cls, self.depth, self.buf, self.items = cls, 0, [], []
 
+    def handle_startendtag(self, tag, attrs):
+        pass
+
     def handle_starttag(self, tag, attrs):
+        if tag in _VOID:
+            return
         if self.depth:
             self.depth += 1
         elif self.cls in (dict(attrs).get("class") or "").split():
