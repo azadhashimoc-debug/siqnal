@@ -46,3 +46,23 @@ For Baku, use categories with high complaint potential: courier/delivery, privat
 
 ## Automatic source quality
 Every 4 weeks, compute `yield = number of classifications that fed a candidate topic / number of records` for each source. Mark sources in the bottom 20% as `disabled`. The list then cleans itself.
+
+## Task 3 live check results (2026-11-08)
+RSS URLs were fetched with a 8s timeout and parsed as XML.
+
+| Source | URL | Result |
+|---|---|---|
+| Oxu.az | https://oxu.az/feed | working (50 items). Kept. |
+| Oxu.az | https://oxu.az/rss | dead: HTTP 404. Dropped. |
+| Qafqazinfo | https://qafqazinfo.az/rss | working (100 items). Kept. |
+| APA | https://apa.az/rss | working (50 items). Kept. |
+| Modern.az | https://modern.az/rss | working (30 items). Kept. |
+| Sia.az | https://sia.az/feed.php | working (25 items). Kept. |
+| AzerNews | https://www.azernews.az/feed.php | working (25 items). Kept. |
+| Marja.az | https://marja.az/rss | dead: HTTP 404. Dropped. |
+| stat.gov.az | https://stat.gov.az/rss/en | dead: connection reset by server. Dropped (may be blocking scripted clients; retry later). |
+| Report.az, Azertac, Trend.az | feed TBD | not checked: no candidate URL known. |
+
+Not done in Task 3 (need API keys or manual discovery); config lists are empty with a TODO:
+- Telegram channel discovery (`TELEGRAM_CHANNELS`), YouTube channel discovery (`YOUTUBE_CHANNELS`), Apify actors and pages (`APIFY_ACTORS`).
+- News comment selectors (`NEWS_COMMENT_SITES`): not filled. Server-rendered comments were not confirmed from fetched article HTML, so no site is enabled. The adapter works once a `{domain: class}` pair is added.

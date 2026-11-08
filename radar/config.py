@@ -3,3 +3,40 @@ import os
 DB_PATH = os.environ.get("RADAR_DB_PATH", "radar.db")
 MAX_VALIDATIONS_PER_WEEK = 15
 MAX_APIFY_RUNS_PER_WEEK = 10
+
+# Live-checked 2026-11-08 (see docs/sources.md). Dead: oxu.az/rss, marja.az/rss, stat.gov.az/rss/en.
+FEEDS = [
+    {"source": "Oxu.az", "url": "https://oxu.az/feed"},
+    {"source": "Qafqazinfo", "url": "https://qafqazinfo.az/rss"},
+    {"source": "APA", "url": "https://apa.az/rss"},
+    {"source": "Modern.az", "url": "https://modern.az/rss"},
+    {"source": "Sia.az", "url": "https://sia.az/feed.php"},
+    {"source": "AzerNews", "url": "https://www.azernews.az/feed.php"},
+]
+
+SIGNAL_PATTERNS = {
+    "PROBLEM_SIKAYET": [
+        "bahalaşma", "qiymət artımı", "bahalaşdı", "narazılıq", "şikayət",
+        "növbə", "problem", "cərimə", "cərimələnəcək", "qıtlıq", "təmir",
+        "tıxac", "çatışmazlıq", "ləğv edildi",
+    ],
+    "REGULYASIYA_QANUN": [
+        "qanun", "qərar", "yeni qayda", "vergi", "rüsum", "gömrük",
+        "lisenziya", "icazə", "cərimə qərarı", "standart", "nazirlər kabineti",
+        "məcburidir", "tələb olunacaq", "qadağan edildi",
+    ],
+    "BIZNES_TREND": [
+        "investisiya", "idxal", "ixrac", "kredit", "startap", "subsidiya",
+        "qrant", "yeni zavod", "istehsal", "müqavilə", "tərəfdaşlıq",
+        "süni intellekt", "e-ticarət", "satışlar artdı",
+    ],
+}
+
+USER_AGENT = "Mozilla/5.0 (compatible; firsat-radari/0.1)"
+
+# {domain: css-class selector}. Empty: comment HTML not confirmed server-rendered (see docs/sources.md).
+NEWS_COMMENT_SITES = {}
+# TODO: discovery for these needs API keys (Telegram/YouTube/Apify); not done in Task 3.
+YOUTUBE_CHANNELS = []
+TELEGRAM_CHANNELS = []
+APIFY_ACTORS = []
