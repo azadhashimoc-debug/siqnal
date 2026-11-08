@@ -94,6 +94,7 @@ def migrate(conn: sqlite3.Connection) -> None:
 
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=DELETE")  # WAL sidecar files break Volume commits
     conn.executescript(SCHEMA)
     migrate(conn)
     return conn

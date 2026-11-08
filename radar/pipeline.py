@@ -15,8 +15,7 @@ def build_sources(conn, env) -> list:
     if config.NEWS_COMMENT_SITES:
         from radar.sources.news_comments import NewsCommentsSource
         urls = [r[0] for r in conn.execute(
-            "SELECT url FROM records WHERE kind='news' AND fetched_at >= datetime('now','-3 days')")] \
-            if _has_col(conn, "fetched_at") else []
+            "SELECT url FROM records WHERE kind='news' ORDER BY id DESC LIMIT 200")]
         sources.append(NewsCommentsSource("news_comments", urls))
     else:
         log.info("news_comments skipped: NEWS_COMMENT_SITES empty")
@@ -58,10 +57,10 @@ def run_collect(conn, env=os.environ, sources=None, client=None, today=None) -> 
 
 
 def run_weekly(conn, client, http_post, env=os.environ, report_dir=None, today=None) -> list:
-    validations = validate.validate_week(client, conn, today)
     chat_id = env.get("TELEGRAM_CHAT_ID")
     if not chat_id:
         raise RuntimeError("TELEGRAM_CHAT_ID unset")
+    validations = validate.validate_week(client, conn, today)
     gec = [(vid, v) for vid, v in _with_ids(conn, validations) if v.decision == "gec"]
     bot.send_weekly(conn, http_post, chat_id, gec, report_dir)
     return gec

@@ -34,26 +34,57 @@ def _conn():
     return conn
 
 
+def _drain(conn):
+    """Apply votes the webhook queued in modal.Dict (webhook never writes radar.db)."""
+    from radar import bot
+    votes = modal.Dict.from_name("radar-votes", create_if_missing=True)
+    items = dict(votes.items())
+    bot.drain_votes(conn, items)
+    for k in items:
+        votes.pop(k, None)
+
+
+def _locked(timeout):
+    def deco(fn):
+        def run():
+            from radar import lock
+            d = modal.Dict.from_name("radar-lock", create_if_missing=True)
+            if not lock.acquire(d, ttl=timeout):
+                print(f"{fn.__name__} skipped: another run holds the lock")
+                return None
+            try:
+                volume.reload()
+                return fn()
+            finally:
+                lock.release(d)
+                volume.commit()
+        run.__name__ = fn.__name__
+        return run
+    return deco
+
+
 @app.function(schedule=modal.Cron("0 */3 * * *"), timeout=1800, **COMMON)
+@_locked(1800)
 def collect():
     from radar import pipeline
     conn = _conn()
     try:
+        _drain(conn)
         return pipeline.run_collect(conn)
     finally:
         conn.close()
-        volume.commit()
 
 
 @app.function(schedule=modal.Cron("0 5 * * 1"), timeout=3600, **COMMON)
+@_locked(3600)
 def weekly():
     from radar import bot, pipeline
     conn = _conn()
     try:
+        _drain(conn)
         pipeline.run_weekly(conn, pipeline.make_client(), bot.telegram_post)
     finally:
         conn.close()
-        volume.commit()
 
 
 @app.function(**COMMON)
@@ -70,15 +101,13 @@ def webhook(update: dict, request: Request):
     cb = update.get("callback_query")
     if not cb:
         return {"ok": True}
-    conn = _conn()
-    try:
-        ok = bot.handle_callback(conn, cb.get("data", ""), voter=str(cb["from"]["id"]))
-    finally:
-        conn.close()
-        volume.commit()
+    parsed = bot.parse_callback(cb.get("data", ""))
+    if parsed:
+        votes = modal.Dict.from_name("radar-votes", create_if_missing=True)
+        votes[f"{parsed[0]}:{cb['from']['id']}"] = parsed[1]
     try:
         bot.telegram_post("answerCallbackQuery", {
-            "callback_query_id": cb["id"], "text": "Səs qeydə alındı" if ok else "Keçərsiz"})
+            "callback_query_id": cb["id"], "text": "Səs qeydə alındı" if parsed else "Keçərsiz"})
     except Exception as e:
         print("answerCallbackQuery failed:", e)
     return {"ok": True}
