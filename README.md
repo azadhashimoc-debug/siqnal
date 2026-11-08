@@ -8,6 +8,7 @@ Azərbaycan xəbər/şərhləri -> SQLite -> təsnifat -> trendlər -> yoxlama a
 | ANTHROPIC_API_KEY | təsnifat + yoxlama (yoxdursa təsnifat atlanır) |
 | TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID | həftəlik hesabat |
 | TELEGRAM_WEBHOOK_SECRET | webhook başlığının yoxlanması |
+| DASHBOARD_TOKEN | veb panelə giriş şifrəsi (yoxdursa panel bütün sorğuları rədd edir) |
 | TG_API_ID, TG_API_HASH | Telethon mənbəyi |
 | YOUTUBE_API_KEY | YouTube mənbəyi |
 | APIFY_TOKEN | Apify mənbəyi |
@@ -49,3 +50,7 @@ Telethon: ilk giriş interaktivdir. Lokalda `RADAR_TG_SESSION` ilə session yara
 - YouTube: `YOUTUBE_CHANNELS = ["UC..."]` (kanal id) + YOUTUBE_API_KEY.
 - Apify: `APIFY_ACTORS = ["user/actor"]` + APIFY_TOKEN (həftədə `MAX_APIFY_RUNS_PER_WEEK`).
 - Xəbər şərhləri: `NEWS_COMMENT_SITES = {"site.az": "comment-css-class"}` - yalnız şərhlər server tərəfindən render olunursa (bax docs/sources.md). Son 3 günün xəbər linkləri yoxlanır.
+
+## Dashboard
+`modal deploy modal_app.py` `dashboard` URL-i də verir (`https://<workspace>--firsat-radari-dashboard.modal.run`). `radar-secrets`-ə `DASHBOARD_TOKEN` əlavə edin.
+Bölmələr: ümumi göstəricilər, ideyalar (filtr/sıralama/tam hesabat), trendlər (14 günlük qrafik), mənbələr, qeydlərdə axtarış. Baza yalnız oxunur; 👍/👎 səsi növbəyə düşür və növbəti `collect`/`weekly` işində tətbiq olunur.

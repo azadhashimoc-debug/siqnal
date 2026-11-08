@@ -86,3 +86,20 @@ def webhook(update: dict, request: Request):
     except Exception as e:
         print("answerCallbackQuery failed:", e)
     return {"ok": True}
+
+
+@app.function(**COMMON)
+@modal.asgi_app()
+def dashboard():
+    """Read-only web dashboard. Needs DASHBOARD_TOKEN in radar-secrets."""
+    from radar import config, dashboard as dash
+
+    def open_conn():
+        return dash.open_ro(config.DB_PATH)
+
+    def refresh():
+        volume.reload()
+
+    votes = modal.Dict.from_name("radar-votes", create_if_missing=True)
+    return dash.create_app(open_conn, add_vote=lambda vid, d, voter: votes.put(f"{vid}:{voter}", d),
+                           pending_votes=lambda: dict(votes.items()), refresh=refresh)
