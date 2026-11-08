@@ -45,8 +45,13 @@ def telegram_post(method: str, payload: dict, files=None):
     else:
         req = urllib.request.Request(url, json.dumps(payload).encode(),
                                      {"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:  # urllib errors embed the URL (and so the bot token)
+        token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        msg = f"telegram {method} failed: {type(e).__name__}: {e}"
+        raise RuntimeError(msg.replace(token, "<redacted>") if token else msg) from None
 
 
 def send_weekly(conn, http_post, chat_id, validations, report_dir=None) -> None:

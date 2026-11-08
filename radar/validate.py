@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import date, timedelta
@@ -17,7 +18,8 @@ DIMENSIONS = ("demand", "competition", "willingness_to_pay", "timing")
 DECISIONS = ("gec", "izle", "reddet")
 COSTS = ("az", "orta", "yuksek")
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "validate.md"
-CALIBRATION_DIR = Path(__file__).resolve().parent.parent / "docs" / "calibration"
+CALIBRATION_DIR = Path(os.environ.get("RADAR_CALIBRATION_DIR")
+                       or Path(__file__).resolve().parent.parent / "docs" / "calibration")
 RETRY_NOTE = ("\n\nDİQQƏT: əvvəlki cavab etibarsız idi. Ən azı 3 fərqli növ həll ver "
               "və ən azı biri start_cost=\"az\" olsun.")
 

@@ -21,7 +21,7 @@ class TelegramSource:
         if self._client is None:
             import os
             from telethon.sync import TelegramClient  # lazy
-            self._client = TelegramClient("radar", int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"])
+            self._client = TelegramClient(os.environ.get("RADAR_TG_SESSION", "radar"), int(os.environ["TG_API_ID"]), os.environ["TG_API_HASH"])
             self._client.start()
         return self._client
 
