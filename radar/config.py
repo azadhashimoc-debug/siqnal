@@ -61,3 +61,6 @@ TREND_GROWTH_FACTOR = 2.0
 MIN_NEW_TOPIC_VOICES = 5
 MIN_TREND_SOURCES = 2
 MIN_TREND_AVG_SCORE = 60
+
+# Reports (radar/report.py)
+REPORT_DIR = os.environ.get("RADAR_REPORT_DIR", "reports")
