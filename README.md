@@ -52,5 +52,12 @@ Telethon: ilk giriş interaktivdir. Lokalda `RADAR_TG_SESSION` ilə session yara
 - Xəbər şərhləri: `NEWS_COMMENT_SITES = {"site.az": "comment-css-class"}` - yalnız şərhlər server tərəfindən render olunursa (bax docs/sources.md). Son 3 günün xəbər linkləri yoxlanır.
 
 ## Dashboard
-`modal deploy modal_app.py` `dashboard` URL-i də verir (`https://<workspace>--firsat-radari-dashboard.modal.run`). `radar-secrets`-ə `DASHBOARD_TOKEN` əlavə edin.
-Bölmələr: ümumi göstəricilər, ideyalar (filtr/sıralama/tam hesabat), trendlər (14 günlük qrafik), mənbələr, qeydlərdə axtarış. Baza yalnız oxunur; 👍/👎 səsi növbəyə düşür və növbəti `collect`/`weekly` işində tətbiq olunur.
+`modal deploy modal_app.py` `dashboard` URL-i də verir (`https://<workspace>--firsat-radari-dashboard.modal.run`). `radar-secrets`-ə `DASHBOARD_TOKEN` əlavə edin (yoxdursa panel bütün sorğuları rədd edir).
+
+- **Ümumi:** son toplama/hesabat vaxtı, "İndi topla" və "Həftəlik hesabatı indi işlət" düymələri, 30 günlük qeyd qrafiki, kateqoriyalar, ən yaxşı ideyalar və aktiv mövzular.
+- **İdeyalar:** axtarış; qərar, status, xərc və min skor filtrləri; sıralama; CSV export. Ideyanın səhifəsində tam hesabat, status (Yeni/Baxıldı/Araşdırılır/Başladım/İmtina) və şəxsi qeyd, 👍/👎, Markdown yükləmə, mövzunun əvvəlki yoxlamaları, ← → ilə keçid.
+- **Trendlər:** 14 günlük qrafik, artım əmsalı, namizəd filtri; mövzu səhifəsində 30 günlük qrafik, mənbələr, bütün qeydlər.
+- **Mənbələr:** 14 günlük qrafik, siqnal faizi, səssiz mənbələr.
+- **Axtarış:** mətn, mənbə, növ, kateqoriya (və təsnif olunmamış), min skor; səhifələmə.
+
+Baza paneldən yalnız oxunur (SQLite-a bir yazıcı). Səs və status dəyişiklikləri `radar-votes` növbəsinə düşür, panel onları dərhal göstərir, bazaya isə növbəti `collect`/`weekly` işində yazılır.

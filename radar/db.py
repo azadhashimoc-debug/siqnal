@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS source_state (
     name TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS idea_status (
+    validation_id INTEGER PRIMARY KEY REFERENCES validations(id),
+    status TEXT NOT NULL,
+    note TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS apify_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     actor TEXT,

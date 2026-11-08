@@ -38,6 +38,40 @@ def drain_votes(conn, items: dict) -> int:
     return n
 
 
+STATUSES = ("yeni", "baxildi", "arasdirilir", "basladim", "imtina")
+
+
+def parse_status(value):
+    """Queued dashboard action value -> (status, note) or None."""
+    try:
+        d = json.loads(value) if isinstance(value, str) else dict(value)
+    except (ValueError, TypeError):
+        return None
+    st, note = d.get("status"), d.get("note") or ""
+    if st not in STATUSES or not isinstance(note, str):
+        return None
+    return st, note[:2000]
+
+
+def drain_status(conn, items: dict) -> int:
+    """items keys "status:<validation_id>" -> JSON {"status", "note"}. Other keys ignored."""
+    n = 0
+    for key, value in items.items():
+        kind, _, vid = str(key).partition(":")
+        p = parse_status(value)
+        if kind != "status" or not vid.isdigit() or not p:
+            continue
+        if conn.execute("SELECT 1 FROM validations WHERE id=?", (int(vid),)).fetchone() is None:
+            continue
+        conn.execute("INSERT INTO idea_status(validation_id, status, note, updated_at) "
+                     "VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(validation_id) DO UPDATE SET "
+                     "status=excluded.status, note=excluded.note, updated_at=excluded.updated_at",
+                     (int(vid), p[0], p[1]))
+        n += 1
+    conn.commit()
+    return n
+
+
 def _evidence(conn, topic_id) -> list:
     return conn.execute(
         "SELECT r.text, r.url FROM classifications c JOIN records r ON r.id = c.record_id "

@@ -88,18 +88,25 @@ def webhook(update: dict, request: Request):
     return {"ok": True}
 
 
+
 @app.function(**COMMON)
 @modal.asgi_app()
 def dashboard():
-    """Read-only web dashboard. Needs DASHBOARD_TOKEN in radar-secrets."""
+    """Web dashboard. Needs DASHBOARD_TOKEN in radar-secrets. Reads the DB read-only; votes and
+    status changes go to the radar-votes queue, drained by the next locked job."""
+    import time
     from radar import config, dashboard as dash
 
-    def open_conn():
-        return dash.open_ro(config.DB_PATH)
+    lock_dict = modal.Dict.from_name("radar-lock", create_if_missing=True)
 
-    def refresh():
-        volume.reload()
+    def run_state():
+        held = lock_dict.get("running")
+        fresh = held is not None and time.time() - held < 3600
+        return {"running": held if fresh else None}
 
-    votes = modal.Dict.from_name("radar-votes", create_if_missing=True)
-    return dash.create_app(open_conn, add_vote=lambda vid, d, voter: votes.put(f"{vid}:{voter}", d),
-                           pending_votes=lambda: dict(votes.items()), refresh=refresh)
+    def trigger(job):
+        {"collect": collect, "weekly": weekly}[job].spawn()
+
+    return dash.create_app(lambda: dash.open_ro(config.DB_PATH),
+                           queue=modal.Dict.from_name("radar-votes", create_if_missing=True),
+                           refresh=volume.reload, run_state=run_state, trigger=trigger)

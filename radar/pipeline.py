@@ -1,6 +1,7 @@
+import json
 import logging
 import os
-from datetime import date
+from datetime import date, datetime, timezone
 
 from radar import bot, classify, config, trends, validate
 from radar.collect import collect, disable_low_yield
@@ -53,7 +54,16 @@ def run_collect(conn, env=os.environ, sources=None, client=None, today=None) -> 
     trends.assign_pending(conn)
     trends.update_topic_days(conn, today or date.today())
     _maybe_disable_low_yield(conn, today or date.today())
+    record_run(conn, "last_collect", {"result": result})
     return result
+
+
+def record_run(conn, name: str, info: dict) -> None:
+    """Remember when a job last finished (shown on the dashboard)."""
+    info = {"at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), **info}
+    conn.execute("INSERT OR REPLACE INTO source_state(name, value) VALUES(?, ?)",
+                 (name, json.dumps(info, ensure_ascii=False, default=str)))
+    conn.commit()
 
 
 YIELD_CHECK_DAYS = 28
@@ -80,6 +90,7 @@ def run_weekly(conn, client, http_post, env=os.environ, report_dir=None, today=N
     validations = validate.validate_week(client, conn, today)
     gec = [(vid, v) for vid, v in _with_ids(conn, validations) if v.decision == "gec"]
     bot.send_weekly(conn, http_post, chat_id, gec, report_dir)
+    record_run(conn, "last_weekly", {"validated": len(validations), "sent": len(gec)})
     return gec
 
 
