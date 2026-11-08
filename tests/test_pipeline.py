@@ -117,3 +117,58 @@ def test_lock():
 def test_connect_uses_delete_journal(tmp_path):
     conn = connect(str(tmp_path / "t.db"))
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+
+
+class Vol:
+    def __init__(self, fail=False):
+        self.fail, self.calls = fail, []
+    def reload(self): self.calls.append("reload")
+    def commit(self):
+        self.calls.append("commit")
+        if self.fail:
+            raise RuntimeError("commit failed")
+
+
+def test_run_locked_order_and_pop(tmp_path):
+    from radar import runner
+    path = str(tmp_path / "t.db")
+    c = connect(path); vid = _val(c); c.close()
+    votes, lk, vol = {f"{vid}:7": "up"}, {}, Vol()
+    out = runner.run_locked(vol, votes, lk, 100, lambda: connect(path), lambda conn: "ok")
+    assert out == "ok" and vol.calls == ["reload", "commit"]
+    assert votes == {} and "running" not in lk
+
+
+def test_run_locked_commit_failure_keeps_votes_and_releases(tmp_path):
+    from radar import runner
+    path = str(tmp_path / "t.db")
+    c = connect(path); vid = _val(c); c.close()
+    votes, lk = {f"{vid}:7": "up"}, {}
+    with pytest.raises(RuntimeError):
+        runner.run_locked(Vol(fail=True), votes, lk, 100, lambda: connect(path), lambda conn: None)
+    assert votes == {f"{vid}:7": "up"} and "running" not in lk
+
+
+def test_run_locked_revote_survives(tmp_path):
+    from radar import runner
+    path = str(tmp_path / "t.db")
+    c = connect(path); vid = _val(c); c.close()
+    votes = {f"{vid}:7": "up"}
+    runner.run_locked(Vol(), votes, {}, 100, lambda: connect(path),
+                      lambda conn: votes.__setitem__(f"{vid}:7", "down"))
+    assert votes == {f"{vid}:7": "down"}
+
+
+def test_run_locked_skips_when_held():
+    from radar import runner
+    assert runner.run_locked(Vol(), {}, {"running": 10 ** 12}, 100, None, None) is None
+
+
+def test_modal_app_targets_are_toplevel():
+    import ast
+    tree = ast.parse(open("modal_app.py", encoding="utf-8").read())
+    top = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.FunctionDef) and any("app.function" in ast.dump(d) for d in n.decorator_list):
+            assert n.name in top
+    assert not any(isinstance(n, ast.FunctionDef) and n.name == "_locked" for n in ast.walk(tree))

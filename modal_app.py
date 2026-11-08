@@ -34,57 +34,30 @@ def _conn():
     return conn
 
 
-def _drain(conn):
-    """Apply votes the webhook queued in modal.Dict (webhook never writes radar.db)."""
-    from radar import bot
-    votes = modal.Dict.from_name("radar-votes", create_if_missing=True)
-    items = dict(votes.items())
-    bot.drain_votes(conn, items)
-    for k in items:
-        votes.pop(k, None)
+def _run_locked(job, ttl):
+    from radar import runner
+    runner.run_locked(volume, modal.Dict.from_name("radar-votes", create_if_missing=True),
+                      modal.Dict.from_name("radar-lock", create_if_missing=True), ttl, _conn, job)
 
 
-def _locked(timeout):
-    def deco(fn):
-        def run():
-            from radar import lock
-            d = modal.Dict.from_name("radar-lock", create_if_missing=True)
-            if not lock.acquire(d, ttl=timeout):
-                print(f"{fn.__name__} skipped: another run holds the lock")
-                return None
-            try:
-                volume.reload()
-                return fn()
-            finally:
-                lock.release(d)
-                volume.commit()
-        run.__name__ = fn.__name__
-        return run
-    return deco
+def _collect_job(conn):
+    from radar import pipeline
+    return pipeline.run_collect(conn)
+
+
+def _weekly_job(conn):
+    from radar import bot, pipeline
+    return pipeline.run_weekly(conn, pipeline.make_client(), bot.telegram_post)
 
 
 @app.function(schedule=modal.Cron("0 */3 * * *"), timeout=1800, **COMMON)
-@_locked(1800)
 def collect():
-    from radar import pipeline
-    conn = _conn()
-    try:
-        _drain(conn)
-        return pipeline.run_collect(conn)
-    finally:
-        conn.close()
+    _run_locked(_collect_job, 1800)
 
 
 @app.function(schedule=modal.Cron("0 5 * * 1"), timeout=3600, **COMMON)
-@_locked(3600)
 def weekly():
-    from radar import bot, pipeline
-    conn = _conn()
-    try:
-        _drain(conn)
-        pipeline.run_weekly(conn, pipeline.make_client(), bot.telegram_post)
-    finally:
-        conn.close()
+    _run_locked(_weekly_job, 3600)
 
 
 @app.function(**COMMON)
