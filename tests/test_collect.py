@@ -75,12 +75,13 @@ def test_apify_runs_under_cap_and_records_run():
 
 def test_low_yield_source_disabled():
     conn = connect(":memory:")
+    conn.execute("insert into topics(id, name, candidate_at) values(1, 't', '2026-11-08')")
     for s, n_cls in [("a", 5), ("b", 5), ("c", 5), ("d", 5), ("e", 0)]:
         for i in range(5):
             insert_record(conn, rec(s, i))
         for i in range(n_cls):
             rid = conn.execute("select id from records where source=? limit 1 offset ?", (s, i)).fetchone()[0]
-            conn.execute("insert into classifications(record_id, category) values(?, 'x')", (rid,))
+            conn.execute("insert into classifications(record_id, category, topic_id) values(?, 'x', 1)", (rid,))
     conn.commit()
     y = source_yield(conn, weeks=4)
     assert y["e"] == 0 and y["a"] == 1.0

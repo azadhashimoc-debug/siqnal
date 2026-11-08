@@ -32,7 +32,8 @@ def collect(conn: sqlite3.Connection, sources) -> dict:
 def source_yield(conn: sqlite3.Connection, weeks: int = 4) -> dict:
     rows = conn.execute(
         "SELECT r.source, COUNT(DISTINCT c.record_id) * 1.0 / COUNT(DISTINCT r.id) FROM records r "
-        "LEFT JOIN classifications c ON c.record_id = r.id "
+        "LEFT JOIN (SELECT c2.record_id FROM classifications c2 JOIN topics t ON t.id = c2.topic_id "
+        "WHERE t.candidate_at IS NOT NULL) c ON c.record_id = r.id "
         "WHERE r.created_at >= datetime('now', ?) GROUP BY r.source", (f"-{weeks * 7} days",)).fetchall()
     return {s: y for s, y in rows}
 

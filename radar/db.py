@@ -72,9 +72,28 @@ CREATE TABLE IF NOT EXISTS apify_runs (
 """
 
 
+MIGRATIONS = [
+    ("classifications", "topic_id", "INTEGER REFERENCES topics(id)"),
+    ("topics", "candidate_at", "TEXT"),
+    ("topic_days", "distinct_voices", "INTEGER NOT NULL DEFAULT 0"),
+    ("topic_days", "distinct_sources", "INTEGER NOT NULL DEFAULT 0"),
+    ("topic_days", "avg_score", "REAL"),
+]
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Idempotently add columns missing from tables created by older schema versions."""
+    for table, col, decl in MIGRATIONS:
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+    conn.commit()
+
+
 def connect(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
+    migrate(conn)
     return conn
 
 
