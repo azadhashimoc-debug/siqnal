@@ -18,9 +18,11 @@ image = (
         "RADAR_DB_PATH": "/data/radar.db",
         "RADAR_REPORT_DIR": "/data/reports",
         "RADAR_TG_SESSION": "/data/radar",
+        "RADAR_PROMPT_PATH": "/root/radar/prompts/validate.md",
         "RADAR_CALIBRATION_DIR": "/root/docs/calibration",
     })
     .add_local_python_source("radar")
+    .add_local_dir("radar/prompts", "/root/radar/prompts")
     .add_local_dir("docs/calibration", "/root/docs/calibration")
 )
 

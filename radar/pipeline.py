@@ -52,8 +52,25 @@ def run_collect(conn, env=os.environ, sources=None, client=None, today=None) -> 
         log.info("classify skipped: ANTHROPIC_API_KEY unset")
     trends.assign_pending(conn)
     trends.update_topic_days(conn, today or date.today())
-    disable_low_yield(conn)
+    _maybe_disable_low_yield(conn, today or date.today())
     return result
+
+
+YIELD_CHECK_DAYS = 28
+
+
+def _maybe_disable_low_yield(conn, today) -> None:
+    row = conn.execute("SELECT value FROM source_state WHERE name='last_yield_check'").fetchone()
+    if row:
+        try:
+            if (today - date.fromisoformat(row[0])).days < YIELD_CHECK_DAYS:
+                return
+        except ValueError:
+            pass
+    disable_low_yield(conn)
+    conn.execute("INSERT OR REPLACE INTO source_state(name, value) VALUES('last_yield_check', ?)",
+                 (today.isoformat(),))
+    conn.commit()
 
 
 def run_weekly(conn, client, http_post, env=os.environ, report_dir=None, today=None) -> list:

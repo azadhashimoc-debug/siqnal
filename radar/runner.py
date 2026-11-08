@@ -10,19 +10,24 @@ def run_locked(volume, votes, lock_dict, ttl, open_conn, job):
     try:
         volume.reload()
         items = dict(votes.items())
-        conn = open_conn()
+        ok = False
         try:
-            bot.drain_votes(conn, items)
-            result = job(conn)
+            conn = open_conn()
+            try:
+                bot.drain_votes(conn, items)
+                result = job(conn)
+            finally:
+                conn.close()
+            ok = True
         finally:
-            conn.close()
-        volume.commit()
-        for k, v in items.items():
-            if votes.get(k) == v:
-                try:
-                    votes.pop(k)
-                except KeyError:
-                    pass
+            volume.commit()  # keep paid work even when the job failed
+        if ok:
+            for k, v in items.items():
+                if votes.get(k) == v:
+                    try:
+                        votes.pop(k)
+                    except KeyError:
+                        pass
         return result
     finally:
         lock.release(lock_dict)

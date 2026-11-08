@@ -172,3 +172,32 @@ def test_modal_app_targets_are_toplevel():
         if isinstance(n, ast.FunctionDef) and any("app.function" in ast.dump(d) for d in n.decorator_list):
             assert n.name in top
     assert not any(isinstance(n, ast.FunctionDef) and n.name == "_locked" for n in ast.walk(tree))
+
+
+def test_yield_check_runs_once_per_28_days(monkeypatch, tmp_path):
+    from datetime import date
+    conn = connect(str(tmp_path / "t.db"))
+    n = []
+    monkeypatch.setattr(pipeline, "disable_low_yield", lambda c: n.append(1))
+    monkeypatch.setattr(trends, "assign_pending", lambda c: 0)
+    monkeypatch.setattr(trends, "update_topic_days", lambda c, d: None)
+    for d in (date(2026, 11, 8), date(2026, 11, 8), date(2026, 11, 20), date(2026, 12, 7)):
+        pipeline.run_collect(conn, env={}, sources=[], today=d)
+    assert len(n) == 2
+
+
+def test_run_locked_job_failure_still_commits_keeps_votes(tmp_path):
+    from radar import runner
+    path = str(tmp_path / "t.db")
+    c = connect(path); vid = _val(c); c.close()
+    votes, lk, vol = {f"{vid}:7": "up"}, {}, Vol()
+    def boom(conn): raise ValueError("x")
+    with pytest.raises(ValueError):
+        runner.run_locked(vol, votes, lk, 100, lambda: connect(path), boom)
+    assert "commit" in vol.calls and votes and "running" not in lk
+
+
+def test_modal_app_ships_prompts_and_calibration():
+    src = open("modal_app.py", encoding="utf-8").read()
+    assert '.add_local_dir("radar/prompts"' in src and '.add_local_dir("docs/calibration"' in src
+    assert "RADAR_PROMPT_PATH" in src

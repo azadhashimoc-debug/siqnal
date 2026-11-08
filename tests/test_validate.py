@@ -134,3 +134,38 @@ def test_numbers_without_url_marked_unverified():
     assert "ayda 5 AZN abunə" in v.unverified_claims
     v = V.validate_topic(Stub(payload(solutions=sols, market_size={"estimate": "120000", "url": "https://s.az"})), mkdb(), 1)
     assert v.unverified_claims == []
+
+
+class PauseStub(Stub):
+    def __init__(self, pauses, text):
+        super().__init__(text)
+        self.pauses = pauses
+
+    def _create(self, **kw):
+        r = super()._create(**kw)
+        if self.calls <= self.pauses:
+            r.stop_reason = "pause_turn"
+        return r
+
+
+def _topic_conn(tmp_path):
+    conn = db.connect(str(tmp_path / "v.db"))
+    conn.execute("INSERT INTO topics(id, name) VALUES(1,'t')")
+    conn.commit()
+    return conn
+
+
+def test_pause_turn_continues_and_counts(tmp_path):
+    conn = _topic_conn(tmp_path)
+    c = PauseStub(1, payload())
+    v = V.validate_topic(c, conn, 1)
+    assert c.calls == 2 and v.api_calls == 2
+
+
+def test_pause_turn_still_paused_is_parse_error(tmp_path):
+    import pytest
+    conn = _topic_conn(tmp_path)
+    c = PauseStub(99, payload())
+    with pytest.raises(V.ValidateParseError):
+        V.validate_topic(c, conn, 1)
+    assert c.calls <= 3

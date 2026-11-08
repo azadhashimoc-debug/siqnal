@@ -17,7 +17,8 @@ REVALIDATE_DAYS = 28
 DIMENSIONS = ("demand", "competition", "willingness_to_pay", "timing")
 DECISIONS = ("gec", "izle", "reddet")
 COSTS = ("az", "orta", "yuksek")
-PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "validate.md"
+PROMPT_PATH = Path(os.environ.get("RADAR_PROMPT_PATH")
+                   or Path(__file__).resolve().parent / "prompts" / "validate.md")
 CALIBRATION_DIR = Path(os.environ.get("RADAR_CALIBRATION_DIR")
                        or Path(__file__).resolve().parent.parent / "docs" / "calibration")
 RETRY_NOTE = ("\n\nDİQQƏT: əvvəlki cavab etibarsız idi. Ən azı 3 fərqli növ həll ver "
@@ -175,12 +176,27 @@ def _solutions_ok(v: Validation) -> bool:
     return len(v.solutions) >= 3 and any(s.start_cost == "az" for s in v.solutions)
 
 
-def _call(client, prompt: str) -> str:
-    try:
-        resp = client.messages.create(model=MODEL, max_tokens=8000, tools=TOOLS,
-                                      messages=[{"role": "user", "content": prompt}])
-    except Exception as e:  # SDK not imported here; any client exception = API failure
-        raise ValidateAPIError(str(e)) from e
+MAX_CONTINUATIONS = 2
+
+
+def _call(client, prompt: str, max_calls: int = 1 + MAX_CONTINUATIONS, counter=None) -> str:
+    """One logical call; pause_turn is continued up to MAX_CONTINUATIONS times within max_calls.
+    counter (list) gets one item appended per API request made."""
+    messages = [{"role": "user", "content": prompt}]
+    used = 0
+    while True:
+        try:
+            used += 1
+            if counter is not None:
+                counter.append(1)
+            resp = client.messages.create(model=MODEL, max_tokens=8000, tools=TOOLS, messages=messages)
+        except Exception as e:  # SDK not imported here; any client exception = API failure
+            raise ValidateAPIError(str(e)) from e
+        if getattr(resp, "stop_reason", None) != "pause_turn":
+            break
+        if used > MAX_CONTINUATIONS or used >= max_calls:
+            raise ValidateParseError("response still paused after continuations")
+        messages = messages + [{"role": "assistant", "content": resp.content}]
     texts = [b.text for b in resp.content
              if getattr(b, "type", "text") == "text" and getattr(b, "text", None)]
     if not texts:
@@ -200,23 +216,27 @@ def validate_topic(client, conn, topic_id: int, max_calls: int = 2) -> Validatio
     then downgrades gec to izle (reddet stays reddet). Result.api_calls = calls used."""
     prompt = build_prompt(conn, topic_id)
     v = None
+    n = []
     try:
-        v = _parse(topic_id, _call(client, prompt))
-        v.api_calls = 1
+        v = _parse(topic_id, _call(client, prompt, max_calls, n))
+        v.api_calls = len(n)
         if _solutions_ok(v):
             return v
-    except ValidateParseError as e:
+    except (ValidateParseError, ValidateAPIError) as e:
+        e.api_calls = len(n)
+        if isinstance(e, ValidateAPIError):
+            raise
         log.warning("validate parse error for topic %s: %s", topic_id, e)
-        if max_calls < 2:
-            raise ValidateParseError(f"{e} (1 call used)") from e
-    if max_calls < 2:
+        if max_calls - len(n) < 1:
+            raise ValidateParseError(f"{e} ({len(n)} call(s) used)") from e
+    if max_calls - len(n) < 1:
         return _cap(v)
     try:
-        v = _parse(topic_id, _call(client, prompt + RETRY_NOTE))
+        v = _parse(topic_id, _call(client, prompt + RETRY_NOTE, max_calls - len(n), n))
     except (ValidateParseError, ValidateAPIError) as e:
-        e.api_calls = 2
+        e.api_calls = len(n)
         raise
-    v.api_calls = 2
+    v.api_calls = len(n)
     return v if _solutions_ok(v) else _cap(v)
 
 
