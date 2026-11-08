@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field, asdict
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -56,6 +56,7 @@ class Validation:
     risks: list
     market_size: dict
     unverified_claims: list
+    api_calls: int = 0  # API calls spent producing this result (not persisted semantics)
 
 
 def extract_json(raw: str):
@@ -147,7 +148,25 @@ def _parse(topic_id: int, raw: str) -> Validation:
         unverified_claims=_strs(d.get("unverified_claims")))
     if v.decision == "gec" and any(not getattr(v, k)["claims"] for k in DIMENSIONS):
         v.decision = "izle"
+    _flag_unsourced_numbers(v)
     return v
+
+
+_DIGITS = re.compile(r"\d+")
+
+
+def _flag_unsourced_numbers(v: Validation) -> None:
+    """Heuristic: when market_size has no URL, every market_size/solution text that
+    contains a digit sequence is treated as an unverified number and appended to
+    unverified_claims (deduplicated). Over-flags rather than under-flags."""
+    if v.market_size.get("url"):
+        return
+    texts = [v.market_size.get("estimate", "")]
+    for s in v.solutions:
+        texts += [s.title, s.how_it_works, s.business_model, s.start_cost_text, s.first_step]
+    for t in texts:
+        if t and _DIGITS.search(t) and t not in v.unverified_claims:
+            v.unverified_claims.append(t)
 
 
 def _solutions_ok(v: Validation) -> bool:
@@ -167,20 +186,36 @@ def _call(client, prompt: str) -> str:
     return texts[-1]
 
 
-def validate_topic(client, conn, topic_id: int) -> Validation:
+def _cap(v: Validation) -> Validation:
+    if v.decision == "gec":
+        v.decision = "izle"
+    return v
+
+
+def validate_topic(client, conn, topic_id: int, max_calls: int = 2) -> Validation:
     """Raises ValidateAPIError / ValidateParseError. If the solutions rule fails
-    (<3 solutions or none with start_cost "az"), retries once, then caps decision at izle."""
+    (<3 solutions or none with start_cost "az"), retries once (if max_calls allows),
+    then downgrades gec to izle (reddet stays reddet). Result.api_calls = calls used."""
     prompt = build_prompt(conn, topic_id)
+    v = None
     try:
         v = _parse(topic_id, _call(client, prompt))
+        v.api_calls = 1
         if _solutions_ok(v):
             return v
     except ValidateParseError as e:
-        log.warning("validate parse error for topic %s, retrying: %s", topic_id, e)
-    v = _parse(topic_id, _call(client, prompt + RETRY_NOTE))
-    if not _solutions_ok(v):
-        v.decision = "izle"
-    return v
+        log.warning("validate parse error for topic %s: %s", topic_id, e)
+        if max_calls < 2:
+            raise ValidateParseError(f"{e} (1 call used)") from e
+    if max_calls < 2:
+        return _cap(v)
+    try:
+        v = _parse(topic_id, _call(client, prompt + RETRY_NOTE))
+    except (ValidateParseError, ValidateAPIError) as e:
+        e.api_calls = 2
+        raise
+    v.api_calls = 2
+    return v if _solutions_ok(v) else _cap(v)
 
 
 def save(conn, v: Validation) -> int:
@@ -193,16 +228,22 @@ def save(conn, v: Validation) -> int:
 
 
 def validate_week(client, conn, today: Optional[date] = None) -> list:
+    """MAX_VALIDATIONS_PER_WEEK caps API calls (retries included), not topics."""
     today = today or date.today()
+    since = (today - timedelta(days=REVALIDATE_DAYS)).isoformat()
     recent = {r[0] for r in conn.execute(
-        "SELECT topic_id FROM validations WHERE created_at >= datetime('now', ?)",
-        (f"-{REVALIDATE_DAYS} days",))}
+        "SELECT topic_id FROM validations WHERE date(created_at) >= ?", (since,))}
     todo = [t for t in trends.candidates(conn, today) if t not in recent]
+    budget = config.MAX_VALIDATIONS_PER_WEEK
     out, errors = [], 0
-    for tid in todo[:config.MAX_VALIDATIONS_PER_WEEK]:
+    for tid in todo:
+        if budget <= 0:
+            break
         try:
-            v = validate_topic(client, conn, tid)
+            v = validate_topic(client, conn, tid, max_calls=min(2, budget))
+            budget -= v.api_calls
         except ValidateAPIError as e:
+            budget -= getattr(e, "api_calls", 1)
             errors += 1
             log.warning("validate API error for topic %s: %s", tid, e)
             if errors >= MAX_CONSECUTIVE_API_ERRORS:
@@ -210,6 +251,7 @@ def validate_week(client, conn, today: Optional[date] = None) -> list:
                 break
             continue
         except ValidateParseError as e:
+            budget -= getattr(e, "api_calls", 1)
             errors = 0
             log.warning("unparseable validation for topic %s: %s", tid, e)
             continue

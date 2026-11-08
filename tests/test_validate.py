@@ -98,3 +98,39 @@ def test_prompt_includes_calibration_and_evidence():
     conn.execute("INSERT INTO classifications(record_id, topic_id) VALUES(1,1)")
     p = V.build_prompt(conn, 1)
     assert "Smart Customs" in p and "https://n.az/1" in p and "şikayət mətni" in p
+
+
+def test_reddet_not_lifted_by_solutions_rule():
+    s = Stub(payload(decision="reddet", solutions=[sol("az"), sol()]))
+    v = V.validate_topic(s, mkdb(), 1)
+    assert v.decision == "reddet" and s.calls == 2
+
+
+def test_weekly_cap_counts_api_calls_with_retries(monkeypatch):
+    conn = mkdb(20)
+    monkeypatch.setattr(V.trends, "candidates", lambda c, today: list(range(1, 21)))
+    s = Stub(payload(solutions=[sol(), sol()]))  # always triggers retry
+    out = V.validate_week(s, conn)
+    assert s.calls <= 15
+    assert all(v.decision == "izle" for v in out)
+
+
+def test_revalidate_window_uses_today(monkeypatch):
+    from datetime import date
+    conn = mkdb(2)
+    conn.execute("INSERT INTO validations(topic_id, created_at) VALUES(1, '2026-01-01 10:00:00')")
+    conn.execute("INSERT INTO validations(topic_id, created_at) VALUES(2, '2026-01-20 10:00:00')")
+    conn.commit()
+    monkeypatch.setattr(V.trends, "candidates", lambda c, today: [1, 2])
+    s = Stub(payload())
+    out = V.validate_week(s, conn, today=date(2026, 2, 1))
+    assert [v.topic_id for v in out] == [1]
+
+
+def test_numbers_without_url_marked_unverified():
+    sols = [dict(sol("az"), business_model="ayda 5 AZN abunə"), sol(), sol("yuksek")]
+    v = V.validate_topic(Stub(payload(solutions=sols, market_size={"estimate": "120000 istifadəçi", "url": None})), mkdb(), 1)
+    assert "120000 istifadəçi" in v.unverified_claims
+    assert "ayda 5 AZN abunə" in v.unverified_claims
+    v = V.validate_topic(Stub(payload(solutions=sols, market_size={"estimate": "120000", "url": "https://s.az"})), mkdb(), 1)
+    assert v.unverified_claims == []

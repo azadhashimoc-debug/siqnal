@@ -9,6 +9,8 @@ QAYDALAR:
 - Lisenziya/hüquqi məhdudiyyətləri yoxla (məs. sığorta agenti, gömrük brokeri, maliyyə lisenziyası) və risks-ə yaz.
 - Azərbaycanda mövcud rəqibləri axtar (competitor_urls). Rəqib varsa, fərqi göstər.
 - Bazar həcmini təxmin et (market_size), mənbə URL-i ilə; yoxdursa url=null.
+- Kalibrasiya nümunələrindəki siqnal növlərini axtar: bürokratiya çətinliyi, güvən/dələduzluq, bilgi boşluğu, iki tərəfli ağrı, mövcud oyunçuya qarşı qiymət, dövlət infrastrukturu güvən qatı kimi.
+- Həll dövlət sisteminə (Smart Customs, e-gov, İTSDA və s.) bağlıdırsa, API/məlumat əldəetmə imkanını yoxla (açıq API varmı, rəsmi inteqrasiya şərtləri) və URL ilə göstər; yoxdursa risks-ə yaz.
 - problem, sub_pains, həll mətnləri və risks Azərbaycan dilində.
 
 HƏDƏF KONKRETLİK NÜMUNƏLƏRİ (istifadəçinin yazdığı):
