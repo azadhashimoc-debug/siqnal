@@ -1,0 +1,14 @@
+[project]
+name = "firsat-radari"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic", "feedparser", "beautifulsoup4", "google-api-python-client",
+    "telethon", "apify-client", "python-telegram-bot", "rapidfuzz",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
