@@ -6,8 +6,8 @@ _WORD = re.compile(r"\w+", re.UNICODE)
 
 
 def _lower(s: str) -> str:
-    # str.lower() maps "I" -> "i" (Turkish would be "ı"); acceptable for prefix matching.
-    return s.lower()
+    # Azerbaijani-aware: "İ"->"i", "I"->"ı" first, so .lower() never emits "i"+combining dot.
+    return s.replace("İ", "i").replace("I", "ı").lower()
 
 
 def stem(word: str) -> str:

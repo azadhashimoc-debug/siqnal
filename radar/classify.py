@@ -1,11 +1,14 @@
 import json
+import logging
 import re
 from dataclasses import dataclass, asdict
 from typing import Optional
 
 from radar.prefilter import prefilter
 
+log = logging.getLogger(__name__)
 MODEL = "claude-haiku-5-5"
+MAX_CONSECUTIVE_API_ERRORS = 3
 CATEGORIES = {"PROBLEM_SIKAYET", "REGULYASIYA_QANUN", "BIZNES_TREND",
               "GUVEN_DELEDUZLUQ", "BILGI_BOSLUGU"}
 
@@ -22,6 +25,10 @@ Sahələr:
 
 Mətn:
 {text}"""
+
+
+class ClassifyAPIError(Exception):
+    """Transient/API failure (rate limit, network, auth); row must stay retryable."""
 
 
 @dataclass
@@ -66,13 +73,17 @@ def _parse(raw: str) -> Optional[Classification]:
 
 
 def classify(client, rec_text: str) -> Optional[Classification]:
+    """None = unparseable/invalid output. Raises ClassifyAPIError on API exceptions."""
     try:
         resp = client.messages.create(
             model=MODEL, max_tokens=500,
             messages=[{"role": "user", "content": PROMPT.format(
                 cats=", ".join(sorted(CATEGORIES)), text=rec_text[:4000])}])
+    except Exception as e:
+        raise ClassifyAPIError(str(e)) from e
+    try:
         return _parse(resp.content[0].text)
-    except Exception:
+    except (AttributeError, IndexError, TypeError):
         return None
 
 
@@ -80,11 +91,22 @@ def classify_pending(conn, client, limit: int = 200) -> int:
     rows = conn.execute(
         "SELECT id, text FROM records WHERE status='new' ORDER BY id LIMIT ?", (limit,)).fetchall()
     done = 0
+    api_errors = 0
     for rid, text in rows:
         if not prefilter(text):
             conn.execute("UPDATE records SET status='prefiltered_out' WHERE id=?", (rid,))
+            conn.commit()
             continue
-        c = classify(client, text)
+        try:
+            c = classify(client, text)
+        except ClassifyAPIError as e:
+            api_errors += 1
+            log.warning("classify API error for record %s: %s", rid, e)
+            if api_errors >= MAX_CONSECUTIVE_API_ERRORS:
+                log.error("stopping batch after %d consecutive API errors", api_errors)
+                break
+            continue
+        api_errors = 0
         if c is None:
             conn.execute("UPDATE records SET status='classify_failed' WHERE id=?", (rid,))
         else:
@@ -93,5 +115,5 @@ def classify_pending(conn, client, limit: int = 200) -> int:
                 (rid, c.category, c.topic_label, c.score, json.dumps(asdict(c), ensure_ascii=False)))
             conn.execute("UPDATE records SET status='classified' WHERE id=?", (rid,))
             done += 1
-    conn.commit()
+        conn.commit()
     return done

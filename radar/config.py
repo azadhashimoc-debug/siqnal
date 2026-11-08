@@ -30,6 +30,14 @@ SIGNAL_PATTERNS = {
         "qrant", "yeni zavod", "istehsal", "müqavilə", "tərəfdaşlıq",
         "süni intellekt", "e-ticarət", "satışlar artdı",
     ],
+    "GUVEN_DELEDUZLUQ": [
+        "aldat", "saxta", "fırıldaq", "dələduz", "beh pulu", "bloka atdı",
+        "pulunu qaytarmır", "makler",
+    ],
+    "BILGI_BOSLUGU": [
+        "pulsuz", "hüququ var", "bilmirlər", "xəbərsizdir", "necə müraciət",
+        "icbari sığorta", "güzəşt",
+    ],
 }
 
 USER_AGENT = "Mozilla/5.0 (compatible; firsat-radari/0.1)"
